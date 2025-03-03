@@ -1,0 +1,1039 @@
+From cbd7993d0cecef88867880c8a4511ebf11845655 Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Fri, 17 Jan 2025 18:48:12 +0000
+Subject: [PATCH 01/10] added placeholder names for loggroup and logstream
+
+---
+ exporter/awscloudwatchlogsexporter/README.md  |  15 +-
+ .../awscloudwatchlogsexporter/exporter.go     |   4 +-
+ exporter/awscloudwatchlogsexporter/util.go    | 101 ++++++
+ .../awscloudwatchlogsexporter/util_test.go    | 342 ++++++++++++++++++
+ 4 files changed, 458 insertions(+), 4 deletions(-)
+ create mode 100644 exporter/awscloudwatchlogsexporter/util.go
+ create mode 100644 exporter/awscloudwatchlogsexporter/util_test.go
+
+diff --git a/exporter/awscloudwatchlogsexporter/README.md b/exporter/awscloudwatchlogsexporter/README.md
+index ce91aa63bd8d..4af6cab42040 100644
+--- a/exporter/awscloudwatchlogsexporter/README.md
++++ b/exporter/awscloudwatchlogsexporter/README.md
+@@ -21,8 +21,19 @@ NOTE: OpenTelemetry Logging support is experimental, hence this exporter is subj
+ 
+ The following settings are required:
+ 
+-- `log_group_name`: The group name of the CloudWatch Logs. If it does not exist it will be created automatically. 
+-- `log_stream_name`: The stream name of the CloudWatch Logs. If it does not exist it will be created automatically.
++- `log_group_name`: The group name of the CloudWatch Logs. If it does not exist it will be created automatically. It supports several placeholder names. One valid example is `/aws/metrics/{ClusterName}`. It will search for `ClusterName` (or `aws.ecs.cluster.name` attribute)
++  - List of valid placeholders:
++    - `{ClusterName}`: `aws.ecs.cluster.name`
++    - `{TaskId}`:               `{aws.ecs.task.id}`,
++	- `{NodeName}`:             `k8s.node.name`,
++	- `{PodName}`:              `pod`,
++	- `{ServiceName}`:          `service.name`,
++	- `{ContainerInstanceId}`:  `aws.ecs.container.instance.id`,
++	- `{TaskDefinitionFamily}`: `aws.ecs.task.family`,
++	- `{InstanceId}`:           `service.instance.id`,
++	- `{FaasName}`:             `faas.name`,
++	- `{FaasVersion}`:          `faas.version`,
++- `log_stream_name`: The stream name of the CloudWatch Logs. If it does not exist it will be created automatically. It supports the same placeholders as `log_group_name`
+ 
+ The following settings can be optionally configured:
+ 
+diff --git a/exporter/awscloudwatchlogsexporter/exporter.go b/exporter/awscloudwatchlogsexporter/exporter.go
+index 9aa14be1e3de..dad5dcdb79a4 100644
+--- a/exporter/awscloudwatchlogsexporter/exporter.go
++++ b/exporter/awscloudwatchlogsexporter/exporter.go
+@@ -179,8 +179,8 @@ type cwLogBody struct {
+ func logToCWLog(resourceAttrs map[string]any, scope pcommon.InstrumentationScope, log plog.LogRecord, config *Config) (*cwlogs.Event, error) {
+ 	// TODO(jbd): Benchmark and improve the allocations.
+ 	// Evaluate go.elastic.co/fastjson as a replacement for encoding/json.
+-	logGroupName := config.LogGroupName
+-	logStreamName := config.LogStreamName
++	// Replace loggroup and logstream with resource attribute
++	logGroupName, logStreamName, _ := getLogInfo(resourceAttrs, config)
+ 
+ 	var bodyJSON []byte
+ 	var err error
+diff --git a/exporter/awscloudwatchlogsexporter/util.go b/exporter/awscloudwatchlogsexporter/util.go
+new file mode 100644
+index 000000000000..5042829e36e1
+--- /dev/null
++++ b/exporter/awscloudwatchlogsexporter/util.go
+@@ -0,0 +1,101 @@
++// Copyright The OpenTelemetry Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package awscloudwatchlogsexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter"
++
++import (
++	"fmt"
++	"strconv"
++	"strings"
++	"time"
++
++	"go.opentelemetry.io/collector/pdata/pcommon"
++	"go.uber.org/zap"
++)
++
++var patternKeyToAttributeMap = map[string]string{
++	"ClusterName":          "aws.ecs.cluster.name",
++	"TaskId":               "aws.ecs.task.id",
++	"NodeName":             "k8s.node.name",
++	"PodName":              "pod",
++	"ServiceName":          "service.name",
++	"ContainerInstanceId":  "aws.ecs.container.instance.id",
++	"TaskDefinitionFamily": "aws.ecs.task.family",
++	"InstanceId":           "service.instance.id",
++	"FaasName":             "faas.name",
++	"FaasVersion":          "faas.version",
++}
++
++func replacePatterns(s string, attrMap map[string]string, logger *zap.Logger) (string, bool) {
++	success := true
++	var foundAndReplaced bool
++	for key := range patternKeyToAttributeMap {
++		s, foundAndReplaced = replacePatternWithAttrValue(s, key, attrMap, logger)
++		success = success && foundAndReplaced
++	}
++	return s, success
++}
++
++func replacePatternWithAttrValue(s, patternKey string, attrMap map[string]string, logger *zap.Logger) (string, bool) {
++	pattern := "{" + patternKey + "}"
++	if strings.Contains(s, pattern) {
++		if value, ok := attrMap[patternKey]; ok {
++			return replace(s, pattern, value, logger)
++		} else if value, ok := attrMap[patternKeyToAttributeMap[patternKey]]; ok {
++			return replace(s, pattern, value, logger)
++		}
++		logger.Debug("No resource attribute found for pattern " + pattern)
++		return strings.ReplaceAll(s, pattern, "undefined"), false
++	}
++	return s, true
++}
++
++func replace(s, pattern string, value string, logger *zap.Logger) (string, bool) {
++	if value == "" {
++		logger.Debug("Empty resource attribute value found for pattern " + pattern)
++		return strings.ReplaceAll(s, pattern, "undefined"), false
++	}
++	return strings.ReplaceAll(s, pattern, value), true
++}
++
++// getLogInfo retrieves the log group and log stream names from a given set of metrics.
++func getLogInfo(resourceAttrs map[string]any, config *Config) (string, string, bool) {
++	var logGroup, logStream string
++	groupReplaced := true
++	streamReplaced := true
++
++	// Convert to map[string]string
++	strAttributeMap := anyMaptoStringMap(resourceAttrs)
++
++	// Override log group/stream if specified in config. However, in this case, customer won't have correlation experience
++	if len(config.LogGroupName) > 0 {
++		logGroup, groupReplaced = replacePatterns(config.LogGroupName, strAttributeMap, config.logger)
++	}
++	if len(config.LogStreamName) > 0 {
++		logStream, streamReplaced = replacePatterns(config.LogStreamName, strAttributeMap, config.logger)
++	}
++
++	return logGroup, logStream, (groupReplaced && streamReplaced)
++}
++
++func anyMaptoStringMap(resourceAttrs map[string]any) map[string]string {
++	strMap := make(map[string]string)
++	for key, value := range resourceAttrs {
++		switch v := value.(type) {
++		case string:
++			strMap[key] = v
++		case int:
++			strMap[key] = strconv.Itoa(v)
++		case bool:
++			strMap[key] = strconv.FormatBool(v)
++		default:
++			strMap[key] = fmt.Sprintf("%v", v)
++		}
++	}
++	return strMap
++}
++
++// unixNanoToMilliseconds converts a timestamp in nanoseconds to milliseconds.
++func unixNanoToMilliseconds(timestamp pcommon.Timestamp) int64 {
++	return int64(uint64(timestamp) / uint64(time.Millisecond))
++}
+diff --git a/exporter/awscloudwatchlogsexporter/util_test.go b/exporter/awscloudwatchlogsexporter/util_test.go
+new file mode 100644
+index 000000000000..2d61f493f11b
+--- /dev/null
++++ b/exporter/awscloudwatchlogsexporter/util_test.go
+@@ -0,0 +1,342 @@
++// Copyright The OpenTelemetry Authors
++// SPDX-License-Identifier: Apache-2.0
++
++package awscloudwatchlogsexporter
++
++import (
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++	"go.opentelemetry.io/collector/pdata/pmetric"
++	conventions "go.opentelemetry.io/collector/semconv/v1.27.0"
++	"go.uber.org/zap"
++
++	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/occonventions"
++)
++
++func TestReplacePatternValidTaskId(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "{TaskId}"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("aws.ecs.cluster.name", "test-cluster-name")
++	//attrMap.PutStr("aws.ecs.task.id", "test-task-id")
++
++	attrMap := map[string]any{
++		"aws.ecs.cluster.name": "test-cluster-name",
++		"aws.ecs.task.id":      "test-task-id",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "test-task-id", s)
++	assert.True(t, success)
++}
++
++func TestReplacePatternValidServiceName(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "{ServiceName}"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("service.name", "some-test-service")
++
++	attrMap := map[string]any{
++		"service.name": "some-test-service",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "some-test-service", s)
++	assert.True(t, success)
++}
++
++func TestReplacePatternValidClusterName(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "/aws/ecs/containerinsights/{ClusterName}/performance"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("aws.ecs.cluster.name", "test-cluster-name")
++	//attrMap.PutStr("aws.ecs.task.id", "test-task-id")
++
++	attrMap := map[string]any{
++		"aws.ecs.cluster.name": "test-cluster-name",
++		"aws.ecs.task.id":      "test-task-id",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "/aws/ecs/containerinsights/test-cluster-name/performance", s)
++	assert.True(t, success)
++}
++
++func TestReplacePatternMissingAttribute(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "/aws/ecs/containerinsights/{ClusterName}/performance"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("aws.ecs.task.id", "test-task-id")
++
++	attrMap := map[string]any{
++		"aws.ecs.task.id": "test-task-id",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "/aws/ecs/containerinsights/undefined/performance", s)
++	assert.False(t, success)
++}
++
++func TestReplacePatternValidPodName(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "/aws/eks/containerinsights/{PodName}/performance"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("aws.eks.cluster.name", "test-cluster-name")
++	//attrMap.PutStr("PodName", "test-pod-001")
++
++	attrMap := map[string]any{
++		"aws.eks.cluster.name": "test-cluster-name",
++		"PodName":              "test-pod-001",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "/aws/eks/containerinsights/test-pod-001/performance", s)
++	assert.True(t, success)
++}
++
++func TestReplacePatternValidPod(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "/aws/eks/containerinsights/{PodName}/performance"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("aws.eks.cluster.name", "test-cluster-name")
++	//attrMap.PutStr("pod", "test-pod-001")
++
++	attrMap := map[string]any{
++		"aws.eks.cluster.name": "test-cluster-name",
++		"PodName":              "test-pod-001",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "/aws/eks/containerinsights/test-pod-001/performance", s)
++	assert.True(t, success)
++}
++
++func TestReplacePatternMissingPodName(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "/aws/eks/containerinsights/{PodName}/performance"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("aws.eks.cluster.name", "test-cluster-name")
++
++	attrMap := map[string]any{
++		"aws.eks.cluster.name": "test-cluster-name",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "/aws/eks/containerinsights/undefined/performance", s)
++	assert.False(t, success)
++}
++
++func TestReplacePatternAttrPlaceholderClusterName(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "/aws/ecs/containerinsights/{ClusterName}/performance"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("ClusterName", "test-cluster-name")
++
++	attrMap := map[string]any{
++		"ClusterName": "test-cluster-name",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "/aws/ecs/containerinsights/test-cluster-name/performance", s)
++	assert.True(t, success)
++}
++
++func TestReplacePatternWrongKey(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "/aws/ecs/containerinsights/{WrongKey}/performance"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("ClusterName", "test-task-id")
++
++	attrMap := map[string]any{
++		"ClusterName": "test-task-id",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "/aws/ecs/containerinsights/{WrongKey}/performance", s)
++	assert.True(t, success)
++}
++
++func TestReplacePatternNilAttrValue(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "/aws/ecs/containerinsights/{ClusterName}/performance"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutEmpty("ClusterName")
++
++	attrMap := map[string]any{
++		"ClusterName": "",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "/aws/ecs/containerinsights/undefined/performance", s)
++	assert.False(t, success)
++}
++
++func TestReplacePatternValidTaskDefinitionFamily(t *testing.T) {
++	logger := zap.NewNop()
++
++	input := "{TaskDefinitionFamily}"
++
++	//attrMap := pcommon.NewMap()
++	//attrMap.PutStr("aws.ecs.cluster.name", "test-cluster-name")
++	//attrMap.PutStr("aws.ecs.task.family", "test-task-definition-family")
++
++	attrMap := map[string]any{
++		"aws.ecs.cluster.name": "test-cluster-name",
++		"aws.ecs.task.family":  "test-task-definition-family",
++	}
++
++	s, success := replacePatterns(input, anyMaptoStringMap(attrMap), logger)
++
++	assert.Equal(t, "test-task-definition-family", s)
++	assert.True(t, success)
++}
++
++func TestGetLogInfo(t *testing.T) {
++	rm1 := pmetric.NewResourceMetrics()
++	rm1.Resource().Attributes().PutStr(conventions.AttributeServiceName, "myServiceName")
++	rm1.Resource().Attributes().PutStr(occonventions.AttributeExporterVersion, "SomeVersion")
++	rm1.Resource().Attributes().PutStr("aws.ecs.cluster.name", "test-cluster-name")
++	rm1.Resource().Attributes().PutStr("aws.ecs.task.id", "test-task-id")
++	rm1.Resource().Attributes().PutStr("k8s.node.name", "ip-192-168-58-245.ec2.internal")
++	rm1.Resource().Attributes().PutStr("aws.ecs.container.instance.id", "203e0410260d466bab7873bb4f317b4e")
++	rm1.Resource().Attributes().PutStr("aws.ecs.task.family", "test-task-definition-family")
++	rm2 := pmetric.NewResourceMetrics()
++	rm2.Resource().Attributes().PutStr(conventions.AttributeServiceName, "test-emf")
++	rm2.Resource().Attributes().PutStr(occonventions.AttributeExporterVersion, "SomeVersion")
++	rm2.Resource().Attributes().PutStr("ClusterName", "test-cluster-name")
++	rm2.Resource().Attributes().PutStr("TaskId", "test-task-id")
++	rm2.Resource().Attributes().PutStr("NodeName", "ip-192-168-58-245.ec2.internal")
++	rm2.Resource().Attributes().PutStr("ContainerInstanceId", "203e0410260d466bab7873bb4f317b4e")
++	rm2.Resource().Attributes().PutStr("TaskDefinitionFamily", "test-task-definition-family")
++	rms := []pmetric.ResourceMetrics{rm1, rm2}
++
++	testCases := []struct {
++		testName        string
++		namespace       string
++		configLogGroup  string
++		configLogStream string
++		logGroup        string
++		logStream       string
++	}{
++		{
++			"non-empty namespace, no config",
++			"namespace",
++			"",
++			"",
++			"/metrics/namespace",
++			"",
++		},
++		{
++			"empty namespace, no config",
++			"",
++			"",
++			"",
++			"",
++			"",
++		},
++		{
++			"non-empty namespace, config w/o pattern",
++			"namespace",
++			"test-logGroupName",
++			"test-logStreamName",
++			"test-logGroupName",
++			"test-logStreamName",
++		},
++		{
++			"empty namespace, config w/o pattern",
++			"",
++			"test-logGroupName",
++			"test-logStreamName",
++			"test-logGroupName",
++			"test-logStreamName",
++		},
++		{
++			"non-empty namespace, config w/ pattern",
++			"namespace",
++			"/aws/ecs/containerinsights/{ClusterName}/performance",
++			"{TaskId}",
++			"/aws/ecs/containerinsights/test-cluster-name/performance",
++			"test-task-id",
++		},
++		{
++			"empty namespace, config w/ pattern",
++			"",
++			"/aws/ecs/containerinsights/{ClusterName}/performance",
++			"{TaskId}",
++			"/aws/ecs/containerinsights/test-cluster-name/performance",
++			"test-task-id",
++		},
++		// test case for aws container insight usage
++		{
++			"empty namespace, config w/ pattern",
++			"",
++			"/aws/containerinsights/{ClusterName}/performance",
++			"{NodeName}",
++			"/aws/containerinsights/test-cluster-name/performance",
++			"ip-192-168-58-245.ec2.internal",
++		},
++		// test case for AWS ECS EC2 container insights usage
++		{
++			"empty namespace, config w/ pattern",
++			"",
++			"/aws/containerinsights/{ClusterName}/performance",
++			"instanceTelemetry/{ContainerInstanceId}",
++			"/aws/containerinsights/test-cluster-name/performance",
++			"instanceTelemetry/203e0410260d466bab7873bb4f317b4e",
++		},
++		{
++			"empty namespace, config w/ pattern",
++			"",
++			"/aws/containerinsights/{ClusterName}/performance",
++			"{TaskDefinitionFamily}-{TaskId}",
++			"/aws/containerinsights/test-cluster-name/performance",
++			"test-task-definition-family-test-task-id",
++		},
++	}
++
++	for i := range rms {
++		for _, tc := range testCases {
++			t.Run(tc.testName, func(t *testing.T) {
++				config := &Config{
++					LogGroupName:  tc.configLogGroup,
++					LogStreamName: tc.configLogStream,
++				}
++				logGroup, logStream, success := getLogInfo(rms[i], tc.namespace, config)
++				assert.Equal(t, tc.logGroup, logGroup)
++				assert.Equal(t, tc.logStream, logStream)
++				assert.True(t, success)
++			})
++		}
++	}
++}
+
+From ed495e6856802f39f4fdbe0f13aebdac02108fec Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Fri, 17 Jan 2025 18:58:12 +0000
+Subject: [PATCH 02/10] fix typo
+
+---
+ exporter/awscloudwatchlogsexporter/README.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/exporter/awscloudwatchlogsexporter/README.md b/exporter/awscloudwatchlogsexporter/README.md
+index 4af6cab42040..21fbe365eddb 100644
+--- a/exporter/awscloudwatchlogsexporter/README.md
++++ b/exporter/awscloudwatchlogsexporter/README.md
+@@ -24,7 +24,7 @@ The following settings are required:
+ - `log_group_name`: The group name of the CloudWatch Logs. If it does not exist it will be created automatically. It supports several placeholder names. One valid example is `/aws/metrics/{ClusterName}`. It will search for `ClusterName` (or `aws.ecs.cluster.name` attribute)
+   - List of valid placeholders:
+     - `{ClusterName}`: `aws.ecs.cluster.name`
+-    - `{TaskId}`:               `{aws.ecs.task.id}`,
++    - `{TaskId}`:               `aws.ecs.task.id`,
+ 	- `{NodeName}`:             `k8s.node.name`,
+ 	- `{PodName}`:              `pod`,
+ 	- `{ServiceName}`:          `service.name`,
+
+From ee95e5f85faa323bd169ae2a90f455f3dcbc759c Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Thu, 6 Feb 2025 18:29:15 +0000
+Subject: [PATCH 03/10] remove comments, add occonventions package
+
+---
+ .../awscloudwatchlogsexporter/util_test.go    | 38 -------------------
+ go.mod                                        |  2 +
+ go.sum                                        |  2 +
+ 3 files changed, 4 insertions(+), 38 deletions(-)
+ create mode 100644 go.sum
+
+diff --git a/exporter/awscloudwatchlogsexporter/util_test.go b/exporter/awscloudwatchlogsexporter/util_test.go
+index 2d61f493f11b..26221e4f5f5b 100644
+--- a/exporter/awscloudwatchlogsexporter/util_test.go
++++ b/exporter/awscloudwatchlogsexporter/util_test.go
+@@ -19,10 +19,6 @@ func TestReplacePatternValidTaskId(t *testing.T) {
+ 
+ 	input := "{TaskId}"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("aws.ecs.cluster.name", "test-cluster-name")
+-	//attrMap.PutStr("aws.ecs.task.id", "test-task-id")
+-
+ 	attrMap := map[string]any{
+ 		"aws.ecs.cluster.name": "test-cluster-name",
+ 		"aws.ecs.task.id":      "test-task-id",
+@@ -39,9 +35,6 @@ func TestReplacePatternValidServiceName(t *testing.T) {
+ 
+ 	input := "{ServiceName}"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("service.name", "some-test-service")
+-
+ 	attrMap := map[string]any{
+ 		"service.name": "some-test-service",
+ 	}
+@@ -57,10 +50,6 @@ func TestReplacePatternValidClusterName(t *testing.T) {
+ 
+ 	input := "/aws/ecs/containerinsights/{ClusterName}/performance"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("aws.ecs.cluster.name", "test-cluster-name")
+-	//attrMap.PutStr("aws.ecs.task.id", "test-task-id")
+-
+ 	attrMap := map[string]any{
+ 		"aws.ecs.cluster.name": "test-cluster-name",
+ 		"aws.ecs.task.id":      "test-task-id",
+@@ -77,9 +66,6 @@ func TestReplacePatternMissingAttribute(t *testing.T) {
+ 
+ 	input := "/aws/ecs/containerinsights/{ClusterName}/performance"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("aws.ecs.task.id", "test-task-id")
+-
+ 	attrMap := map[string]any{
+ 		"aws.ecs.task.id": "test-task-id",
+ 	}
+@@ -95,10 +81,6 @@ func TestReplacePatternValidPodName(t *testing.T) {
+ 
+ 	input := "/aws/eks/containerinsights/{PodName}/performance"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("aws.eks.cluster.name", "test-cluster-name")
+-	//attrMap.PutStr("PodName", "test-pod-001")
+-
+ 	attrMap := map[string]any{
+ 		"aws.eks.cluster.name": "test-cluster-name",
+ 		"PodName":              "test-pod-001",
+@@ -115,10 +97,6 @@ func TestReplacePatternValidPod(t *testing.T) {
+ 
+ 	input := "/aws/eks/containerinsights/{PodName}/performance"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("aws.eks.cluster.name", "test-cluster-name")
+-	//attrMap.PutStr("pod", "test-pod-001")
+-
+ 	attrMap := map[string]any{
+ 		"aws.eks.cluster.name": "test-cluster-name",
+ 		"PodName":              "test-pod-001",
+@@ -135,9 +113,6 @@ func TestReplacePatternMissingPodName(t *testing.T) {
+ 
+ 	input := "/aws/eks/containerinsights/{PodName}/performance"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("aws.eks.cluster.name", "test-cluster-name")
+-
+ 	attrMap := map[string]any{
+ 		"aws.eks.cluster.name": "test-cluster-name",
+ 	}
+@@ -153,9 +128,6 @@ func TestReplacePatternAttrPlaceholderClusterName(t *testing.T) {
+ 
+ 	input := "/aws/ecs/containerinsights/{ClusterName}/performance"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("ClusterName", "test-cluster-name")
+-
+ 	attrMap := map[string]any{
+ 		"ClusterName": "test-cluster-name",
+ 	}
+@@ -171,9 +143,6 @@ func TestReplacePatternWrongKey(t *testing.T) {
+ 
+ 	input := "/aws/ecs/containerinsights/{WrongKey}/performance"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("ClusterName", "test-task-id")
+-
+ 	attrMap := map[string]any{
+ 		"ClusterName": "test-task-id",
+ 	}
+@@ -189,9 +158,6 @@ func TestReplacePatternNilAttrValue(t *testing.T) {
+ 
+ 	input := "/aws/ecs/containerinsights/{ClusterName}/performance"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutEmpty("ClusterName")
+-
+ 	attrMap := map[string]any{
+ 		"ClusterName": "",
+ 	}
+@@ -207,10 +173,6 @@ func TestReplacePatternValidTaskDefinitionFamily(t *testing.T) {
+ 
+ 	input := "{TaskDefinitionFamily}"
+ 
+-	//attrMap := pcommon.NewMap()
+-	//attrMap.PutStr("aws.ecs.cluster.name", "test-cluster-name")
+-	//attrMap.PutStr("aws.ecs.task.family", "test-task-definition-family")
+-
+ 	attrMap := map[string]any{
+ 		"aws.ecs.cluster.name": "test-cluster-name",
+ 		"aws.ecs.task.family":  "test-task-definition-family",
+diff --git a/go.mod b/go.mod
+index 9bcf98dce455..91d7908a418b 100644
+--- a/go.mod
++++ b/go.mod
+@@ -31,3 +31,5 @@ exclude github.com/DataDog/agent-payload/v5 v5.0.59
+ 
+ // openshift removed all tags from their repo, use the pseudoversion from the release-3.9 branch HEAD
+ replace github.com/openshift/api v3.9.0+incompatible => github.com/openshift/api v0.0.0-20180801171038-322a19404e37
++
++require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
+diff --git a/go.sum b/go.sum
+new file mode 100644
+index 000000000000..6deb8a468b03
+--- /dev/null
++++ b/go.sum
+@@ -0,0 +1,2 @@
++github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 h1:3H9R5Ztc4ISphy+bRlHHExqtS04PBYi7Fptwl9XA52M=
++github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0/go.mod h1:txjr7nwuLZUBitwpU4G7EkZ3gyMBfI/4DXMJxX6NAtU=
+
+From 9b775de80efb4d4040ddd6109f714b49a0b09ce8 Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Thu, 6 Feb 2025 18:57:17 +0000
+Subject: [PATCH 04/10] added changelog
+
+---
+ ...c-loggroup-logstream-names-cloudwatch.yaml | 27 +++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+ create mode 100644 .chloggen/dynamic-loggroup-logstream-names-cloudwatch.yaml
+
+diff --git a/.chloggen/dynamic-loggroup-logstream-names-cloudwatch.yaml b/.chloggen/dynamic-loggroup-logstream-names-cloudwatch.yaml
+new file mode 100644
+index 000000000000..ff10fb836e1d
+--- /dev/null
++++ b/.chloggen/dynamic-loggroup-logstream-names-cloudwatch.yaml
+@@ -0,0 +1,27 @@
++# Use this changelog template to create an entry for release notes.
++
++# One of 'breaking', 'deprecation', 'new_component', 'enhancement', 'bug_fix'
++change_type: enhancement
++
++# The name of the component, or a single word describing the area of concern, (e.g. filelogreceiver)
++component: awscloudwatchlogsexporter
++
++# A brief description of the change.  Surround your text with quotes ("") if it needs to start with a backtick (`).
++note: Add dynamic log_group_name and log_group_stream naming, based on awsemfexporter
++
++# Mandatory: One or more tracking issues related to the change. You can use the PR number here if no issue exists.
++issues: [31382]
++
++# (Optional) One or more lines of additional information to render under the primary note.
++# These lines will be padded with 2 spaces and then inserted directly into the document.
++# Use pipe (|) for multiline entries.
++subtext:
++
++# If your change doesn't affect end users or the exported elements of any package,
++# you should instead start your pull request title with [chore] or use the "Skip Changelog" label.
++# Optional: The change log or logs in which this entry should be included.
++# e.g. '[user]' or '[user, api]'
++# Include 'user' if the change is relevant to end users.
++# Include 'api' if there is a change to a library API.
++# Default: '[user]'
++change_logs: [user]
+
+From 93fe5e8bec1882e1933a60b48cbacccf5ae6f27b Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Thu, 6 Feb 2025 19:19:46 +0000
+Subject: [PATCH 05/10] remove unneded pmetrics test
+
+---
+ .../awscloudwatchlogsexporter/util_test.go    | 123 ------------------
+ go.mod                                        |   2 +
+ 2 files changed, 2 insertions(+), 123 deletions(-)
+
+diff --git a/exporter/awscloudwatchlogsexporter/util_test.go b/exporter/awscloudwatchlogsexporter/util_test.go
+index 26221e4f5f5b..6b9c58c97100 100644
+--- a/exporter/awscloudwatchlogsexporter/util_test.go
++++ b/exporter/awscloudwatchlogsexporter/util_test.go
+@@ -7,11 +7,7 @@ import (
+ 	"testing"
+ 
+ 	"github.com/stretchr/testify/assert"
+-	"go.opentelemetry.io/collector/pdata/pmetric"
+-	conventions "go.opentelemetry.io/collector/semconv/v1.27.0"
+ 	"go.uber.org/zap"
+-
+-	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/occonventions"
+ )
+ 
+ func TestReplacePatternValidTaskId(t *testing.T) {
+@@ -183,122 +179,3 @@ func TestReplacePatternValidTaskDefinitionFamily(t *testing.T) {
+ 	assert.Equal(t, "test-task-definition-family", s)
+ 	assert.True(t, success)
+ }
+-
+-func TestGetLogInfo(t *testing.T) {
+-	rm1 := pmetric.NewResourceMetrics()
+-	rm1.Resource().Attributes().PutStr(conventions.AttributeServiceName, "myServiceName")
+-	rm1.Resource().Attributes().PutStr(occonventions.AttributeExporterVersion, "SomeVersion")
+-	rm1.Resource().Attributes().PutStr("aws.ecs.cluster.name", "test-cluster-name")
+-	rm1.Resource().Attributes().PutStr("aws.ecs.task.id", "test-task-id")
+-	rm1.Resource().Attributes().PutStr("k8s.node.name", "ip-192-168-58-245.ec2.internal")
+-	rm1.Resource().Attributes().PutStr("aws.ecs.container.instance.id", "203e0410260d466bab7873bb4f317b4e")
+-	rm1.Resource().Attributes().PutStr("aws.ecs.task.family", "test-task-definition-family")
+-	rm2 := pmetric.NewResourceMetrics()
+-	rm2.Resource().Attributes().PutStr(conventions.AttributeServiceName, "test-emf")
+-	rm2.Resource().Attributes().PutStr(occonventions.AttributeExporterVersion, "SomeVersion")
+-	rm2.Resource().Attributes().PutStr("ClusterName", "test-cluster-name")
+-	rm2.Resource().Attributes().PutStr("TaskId", "test-task-id")
+-	rm2.Resource().Attributes().PutStr("NodeName", "ip-192-168-58-245.ec2.internal")
+-	rm2.Resource().Attributes().PutStr("ContainerInstanceId", "203e0410260d466bab7873bb4f317b4e")
+-	rm2.Resource().Attributes().PutStr("TaskDefinitionFamily", "test-task-definition-family")
+-	rms := []pmetric.ResourceMetrics{rm1, rm2}
+-
+-	testCases := []struct {
+-		testName        string
+-		namespace       string
+-		configLogGroup  string
+-		configLogStream string
+-		logGroup        string
+-		logStream       string
+-	}{
+-		{
+-			"non-empty namespace, no config",
+-			"namespace",
+-			"",
+-			"",
+-			"/metrics/namespace",
+-			"",
+-		},
+-		{
+-			"empty namespace, no config",
+-			"",
+-			"",
+-			"",
+-			"",
+-			"",
+-		},
+-		{
+-			"non-empty namespace, config w/o pattern",
+-			"namespace",
+-			"test-logGroupName",
+-			"test-logStreamName",
+-			"test-logGroupName",
+-			"test-logStreamName",
+-		},
+-		{
+-			"empty namespace, config w/o pattern",
+-			"",
+-			"test-logGroupName",
+-			"test-logStreamName",
+-			"test-logGroupName",
+-			"test-logStreamName",
+-		},
+-		{
+-			"non-empty namespace, config w/ pattern",
+-			"namespace",
+-			"/aws/ecs/containerinsights/{ClusterName}/performance",
+-			"{TaskId}",
+-			"/aws/ecs/containerinsights/test-cluster-name/performance",
+-			"test-task-id",
+-		},
+-		{
+-			"empty namespace, config w/ pattern",
+-			"",
+-			"/aws/ecs/containerinsights/{ClusterName}/performance",
+-			"{TaskId}",
+-			"/aws/ecs/containerinsights/test-cluster-name/performance",
+-			"test-task-id",
+-		},
+-		// test case for aws container insight usage
+-		{
+-			"empty namespace, config w/ pattern",
+-			"",
+-			"/aws/containerinsights/{ClusterName}/performance",
+-			"{NodeName}",
+-			"/aws/containerinsights/test-cluster-name/performance",
+-			"ip-192-168-58-245.ec2.internal",
+-		},
+-		// test case for AWS ECS EC2 container insights usage
+-		{
+-			"empty namespace, config w/ pattern",
+-			"",
+-			"/aws/containerinsights/{ClusterName}/performance",
+-			"instanceTelemetry/{ContainerInstanceId}",
+-			"/aws/containerinsights/test-cluster-name/performance",
+-			"instanceTelemetry/203e0410260d466bab7873bb4f317b4e",
+-		},
+-		{
+-			"empty namespace, config w/ pattern",
+-			"",
+-			"/aws/containerinsights/{ClusterName}/performance",
+-			"{TaskDefinitionFamily}-{TaskId}",
+-			"/aws/containerinsights/test-cluster-name/performance",
+-			"test-task-definition-family-test-task-id",
+-		},
+-	}
+-
+-	for i := range rms {
+-		for _, tc := range testCases {
+-			t.Run(tc.testName, func(t *testing.T) {
+-				config := &Config{
+-					LogGroupName:  tc.configLogGroup,
+-					LogStreamName: tc.configLogStream,
+-				}
+-				logGroup, logStream, success := getLogInfo(rms[i], tc.namespace, config)
+-				assert.Equal(t, tc.logGroup, logGroup)
+-				assert.Equal(t, tc.logStream, logStream)
+-				assert.True(t, success)
+-			})
+-		}
+-	}
+-}
+diff --git a/go.mod b/go.mod
+index cb23e569d347..979aec71e876 100644
+--- a/go.mod
++++ b/go.mod
+@@ -16,3 +16,5 @@ retract (
+ 	v0.65.0
+ 	v0.37.0 // Contains dependencies on v0.36.0 components, which should have been updated to v0.37.0.
+ )
++
++require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
+
+From 7a262169660837d99fa21ce47621b3044fe5b23b Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Thu, 6 Feb 2025 20:59:14 +0000
+Subject: [PATCH 06/10] ran crosslink
+
+---
+ go.mod | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/go.mod b/go.mod
+index 979aec71e876..245b9458e2ba 100644
+--- a/go.mod
++++ b/go.mod
+@@ -18,3 +18,11 @@ retract (
+ )
+ 
+ require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
++
++replace github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal => ./internal/coreinternal
++
++replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil => ./pkg/pdatautil
++
++replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest => ./pkg/pdatatest
++
++replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden => ./pkg/golden
+
+From 0ba9069ec8e3856afa0c45fbf064d800c523b7ad Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Fri, 7 Feb 2025 17:00:52 +0000
+Subject: [PATCH 07/10] remove unixNanoToMilliseconds func
+
+---
+ exporter/awscloudwatchlogsexporter/util.go | 7 -------
+ 1 file changed, 7 deletions(-)
+
+diff --git a/exporter/awscloudwatchlogsexporter/util.go b/exporter/awscloudwatchlogsexporter/util.go
+index 5042829e36e1..ba773a8363f1 100644
+--- a/exporter/awscloudwatchlogsexporter/util.go
++++ b/exporter/awscloudwatchlogsexporter/util.go
+@@ -7,9 +7,7 @@ import (
+ 	"fmt"
+ 	"strconv"
+ 	"strings"
+-	"time"
+ 
+-	"go.opentelemetry.io/collector/pdata/pcommon"
+ 	"go.uber.org/zap"
+ )
+ 
+@@ -94,8 +92,3 @@ func anyMaptoStringMap(resourceAttrs map[string]any) map[string]string {
+ 	}
+ 	return strMap
+ }
+-
+-// unixNanoToMilliseconds converts a timestamp in nanoseconds to milliseconds.
+-func unixNanoToMilliseconds(timestamp pcommon.Timestamp) int64 {
+-	return int64(uint64(timestamp) / uint64(time.Millisecond))
+-}
+
+From 30c96bca70cda9c65c2d2cb30472b7884bd440d0 Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Thu, 6 Feb 2025 18:29:15 +0000
+Subject: [PATCH 08/10] remove comments, add occonventions package
+
+---
+ go.mod | 13 +++++++------
+ 1 file changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/go.mod b/go.mod
+index 245b9458e2ba..1ea98c794a67 100644
+--- a/go.mod
++++ b/go.mod
+@@ -17,12 +17,13 @@ retract (
+ 	v0.37.0 // Contains dependencies on v0.36.0 components, which should have been updated to v0.37.0.
+ )
+ 
+-require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
+-
+-replace github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal => ./internal/coreinternal
++// see https://github.com/distribution/distribution/issues/3590
++exclude github.com/docker/distribution v2.8.0+incompatible
+ 
+-replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil => ./pkg/pdatautil
++// see https://github.com/DataDog/agent-payload/issues/218
++exclude github.com/DataDog/agent-payload/v5 v5.0.59
+ 
+-replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest => ./pkg/pdatatest
++// openshift removed all tags from their repo, use the pseudoversion from the release-3.9 branch HEAD
++replace github.com/openshift/api v3.9.0+incompatible => github.com/openshift/api v0.0.0-20180801171038-322a19404e37
+ 
+-replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden => ./pkg/golden
++require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
+
+From 50e317e6988181adfb67fc0c29f174d7bc8166f0 Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Thu, 6 Feb 2025 19:19:46 +0000
+Subject: [PATCH 09/10] remove unneded pmetrics test
+
+---
+ go.mod | 9 ---------
+ 1 file changed, 9 deletions(-)
+
+diff --git a/go.mod b/go.mod
+index 1ea98c794a67..979aec71e876 100644
+--- a/go.mod
++++ b/go.mod
+@@ -17,13 +17,4 @@ retract (
+ 	v0.37.0 // Contains dependencies on v0.36.0 components, which should have been updated to v0.37.0.
+ )
+ 
+-// see https://github.com/distribution/distribution/issues/3590
+-exclude github.com/docker/distribution v2.8.0+incompatible
+-
+-// see https://github.com/DataDog/agent-payload/issues/218
+-exclude github.com/DataDog/agent-payload/v5 v5.0.59
+-
+-// openshift removed all tags from their repo, use the pseudoversion from the release-3.9 branch HEAD
+-replace github.com/openshift/api v3.9.0+incompatible => github.com/openshift/api v0.0.0-20180801171038-322a19404e37
+-
+ require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
+
+From f93c96ae4ffbdffe119b9b3c274958e149bcb913 Mon Sep 17 00:00:00 2001
+From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
+Date: Mon, 10 Feb 2025 20:10:26 +0000
+Subject: [PATCH 10/10] run gotidy
+
+---
+ go.mod | 2 --
+ go.sum | 2 --
+ 2 files changed, 4 deletions(-)
+ delete mode 100644 go.sum
+
+diff --git a/go.mod b/go.mod
+index 979aec71e876..cb23e569d347 100644
+--- a/go.mod
++++ b/go.mod
+@@ -16,5 +16,3 @@ retract (
+ 	v0.65.0
+ 	v0.37.0 // Contains dependencies on v0.36.0 components, which should have been updated to v0.37.0.
+ )
+-
+-require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
+diff --git a/go.sum b/go.sum
+deleted file mode 100644
+index 6deb8a468b03..000000000000
+--- a/go.sum
++++ /dev/null
+@@ -1,2 +0,0 @@
+-github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 h1:3H9R5Ztc4ISphy+bRlHHExqtS04PBYi7Fptwl9XA52M=
+-github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0/go.mod h1:txjr7nwuLZUBitwpU4G7EkZ3gyMBfI/4DXMJxX6NAtU=
+
