@@ -12,10 +12,10 @@ Subject: [PATCH 01/10] added placeholder names for loggroup and logstream
  create mode 100644 exporter/awscloudwatchlogsexporter/util.go
  create mode 100644 exporter/awscloudwatchlogsexporter/util_test.go
 
-diff --git a/exporter/awscloudwatchlogsexporter/README.md b/exporter/awscloudwatchlogsexporter/README.md
+diff --git a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/README.md b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/README.md
 index ce91aa63bd8d..4af6cab42040 100644
---- a/exporter/awscloudwatchlogsexporter/README.md
-+++ b/exporter/awscloudwatchlogsexporter/README.md
+--- a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/README.md
++++ b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/README.md
 @@ -21,8 +21,19 @@ NOTE: OpenTelemetry Logging support is experimental, hence this exporter is subj
  
  The following settings are required:
@@ -38,10 +38,10 @@ index ce91aa63bd8d..4af6cab42040 100644
  
  The following settings can be optionally configured:
  
-diff --git a/exporter/awscloudwatchlogsexporter/exporter.go b/exporter/awscloudwatchlogsexporter/exporter.go
+diff --git a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/exporter.go b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/exporter.go
 index 9aa14be1e3de..dad5dcdb79a4 100644
---- a/exporter/awscloudwatchlogsexporter/exporter.go
-+++ b/exporter/awscloudwatchlogsexporter/exporter.go
+--- a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/exporter.go
++++ b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/exporter.go
 @@ -179,8 +179,8 @@ type cwLogBody struct {
  func logToCWLog(resourceAttrs map[string]any, scope pcommon.InstrumentationScope, log plog.LogRecord, config *Config) (*cwlogs.Event, error) {
  	// TODO(jbd): Benchmark and improve the allocations.
@@ -53,16 +53,16 @@ index 9aa14be1e3de..dad5dcdb79a4 100644
  
  	var bodyJSON []byte
  	var err error
-diff --git a/exporter/awscloudwatchlogsexporter/util.go b/exporter/awscloudwatchlogsexporter/util.go
+diff --git a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util.go b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util.go
 new file mode 100644
 index 000000000000..5042829e36e1
 --- /dev/null
-+++ b/exporter/awscloudwatchlogsexporter/util.go
++++ b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util.go
 @@ -0,0 +1,101 @@
 +// Copyright The OpenTelemetry Authors
 +// SPDX-License-Identifier: Apache-2.0
 +
-+package awscloudwatchlogsexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter"
++package awscloudwatchlogsexporter // import "github.com/open-telemetry/opentelemetry-collector-contrib/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter"
 +
 +import (
 +	"fmt"
@@ -160,11 +160,11 @@ index 000000000000..5042829e36e1
 +func unixNanoToMilliseconds(timestamp pcommon.Timestamp) int64 {
 +	return int64(uint64(timestamp) / uint64(time.Millisecond))
 +}
-diff --git a/exporter/awscloudwatchlogsexporter/util_test.go b/exporter/awscloudwatchlogsexporter/util_test.go
+diff --git a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go
 new file mode 100644
 index 000000000000..2d61f493f11b
 --- /dev/null
-+++ b/exporter/awscloudwatchlogsexporter/util_test.go
++++ b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go
 @@ -0,0 +1,342 @@
 +// Copyright The OpenTelemetry Authors
 +// SPDX-License-Identifier: Apache-2.0
@@ -518,10 +518,10 @@ Subject: [PATCH 02/10] fix typo
  exporter/awscloudwatchlogsexporter/README.md | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/exporter/awscloudwatchlogsexporter/README.md b/exporter/awscloudwatchlogsexporter/README.md
+diff --git a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/README.md b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/README.md
 index 4af6cab42040..21fbe365eddb 100644
---- a/exporter/awscloudwatchlogsexporter/README.md
-+++ b/exporter/awscloudwatchlogsexporter/README.md
+--- a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/README.md
++++ b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/README.md
 @@ -24,7 +24,7 @@ The following settings are required:
  - `log_group_name`: The group name of the CloudWatch Logs. If it does not exist it will be created automatically. It supports several placeholder names. One valid example is `/aws/metrics/{ClusterName}`. It will search for `ClusterName` (or `aws.ecs.cluster.name` attribute)
    - List of valid placeholders:
@@ -539,15 +539,12 @@ Subject: [PATCH 03/10] remove comments, add occonventions package
 
 ---
  .../awscloudwatchlogsexporter/util_test.go    | 38 -------------------
- go.mod                                        |  2 +
- go.sum                                        |  2 +
  3 files changed, 4 insertions(+), 38 deletions(-)
- create mode 100644 go.sum
 
-diff --git a/exporter/awscloudwatchlogsexporter/util_test.go b/exporter/awscloudwatchlogsexporter/util_test.go
+diff --git a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go
 index 2d61f493f11b..26221e4f5f5b 100644
---- a/exporter/awscloudwatchlogsexporter/util_test.go
-+++ b/exporter/awscloudwatchlogsexporter/util_test.go
+--- a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go
++++ b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go
 @@ -19,10 +19,6 @@ func TestReplacePatternValidTaskId(t *testing.T) {
  
  	input := "{TaskId}"
@@ -663,24 +660,6 @@ index 2d61f493f11b..26221e4f5f5b 100644
  	attrMap := map[string]any{
  		"aws.ecs.cluster.name": "test-cluster-name",
  		"aws.ecs.task.family":  "test-task-definition-family",
-diff --git a/go.mod b/go.mod
-index 9bcf98dce455..91d7908a418b 100644
---- a/go.mod
-+++ b/go.mod
-@@ -31,3 +31,5 @@ exclude github.com/DataDog/agent-payload/v5 v5.0.59
- 
- // openshift removed all tags from their repo, use the pseudoversion from the release-3.9 branch HEAD
- replace github.com/openshift/api v3.9.0+incompatible => github.com/openshift/api v0.0.0-20180801171038-322a19404e37
-+
-+require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
-diff --git a/go.sum b/go.sum
-new file mode 100644
-index 000000000000..6deb8a468b03
---- /dev/null
-+++ b/go.sum
-@@ -0,0 +1,2 @@
-+github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 h1:3H9R5Ztc4ISphy+bRlHHExqtS04PBYi7Fptwl9XA52M=
-+github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0/go.mod h1:txjr7nwuLZUBitwpU4G7EkZ3gyMBfI/4DXMJxX6NAtU=
 
 From 9b775de80efb4d4040ddd6109f714b49a0b09ce8 Mon Sep 17 00:00:00 2001
 From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
@@ -733,13 +712,12 @@ Subject: [PATCH 05/10] remove unneded pmetrics test
 
 ---
  .../awscloudwatchlogsexporter/util_test.go    | 123 ------------------
- go.mod                                        |   2 +
  2 files changed, 2 insertions(+), 123 deletions(-)
 
-diff --git a/exporter/awscloudwatchlogsexporter/util_test.go b/exporter/awscloudwatchlogsexporter/util_test.go
+diff --git a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go
 index 26221e4f5f5b..6b9c58c97100 100644
---- a/exporter/awscloudwatchlogsexporter/util_test.go
-+++ b/exporter/awscloudwatchlogsexporter/util_test.go
+--- a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go
++++ b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util_test.go
 @@ -7,11 +7,7 @@ import (
  	"testing"
  
@@ -875,42 +853,6 @@ index 26221e4f5f5b..6b9c58c97100 100644
 -		}
 -	}
 -}
-diff --git a/go.mod b/go.mod
-index cb23e569d347..979aec71e876 100644
---- a/go.mod
-+++ b/go.mod
-@@ -16,3 +16,5 @@ retract (
- 	v0.65.0
- 	v0.37.0 // Contains dependencies on v0.36.0 components, which should have been updated to v0.37.0.
- )
-+
-+require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
-
-From 7a262169660837d99fa21ce47621b3044fe5b23b Mon Sep 17 00:00:00 2001
-From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
-Date: Thu, 6 Feb 2025 20:59:14 +0000
-Subject: [PATCH 06/10] ran crosslink
-
----
- go.mod | 8 ++++++++
- 1 file changed, 8 insertions(+)
-
-diff --git a/go.mod b/go.mod
-index 979aec71e876..245b9458e2ba 100644
---- a/go.mod
-+++ b/go.mod
-@@ -18,3 +18,11 @@ retract (
- )
- 
- require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
-+
-+replace github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal => ./internal/coreinternal
-+
-+replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil => ./pkg/pdatautil
-+
-+replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest => ./pkg/pdatatest
-+
-+replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden => ./pkg/golden
 
 From 0ba9069ec8e3856afa0c45fbf064d800c523b7ad Mon Sep 17 00:00:00 2001
 From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
@@ -921,10 +863,10 @@ Subject: [PATCH 07/10] remove unixNanoToMilliseconds func
  exporter/awscloudwatchlogsexporter/util.go | 7 -------
  1 file changed, 7 deletions(-)
 
-diff --git a/exporter/awscloudwatchlogsexporter/util.go b/exporter/awscloudwatchlogsexporter/util.go
+diff --git a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util.go b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util.go
 index 5042829e36e1..ba773a8363f1 100644
---- a/exporter/awscloudwatchlogsexporter/util.go
-+++ b/exporter/awscloudwatchlogsexporter/util.go
+--- a/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util.go
++++ b/vendor/github.com/open-telemetry/opentelemetry-collector-contrib/exporter/awscloudwatchlogsexporter/util.go
 @@ -7,9 +7,7 @@ import (
  	"fmt"
  	"strconv"
@@ -945,95 +887,4 @@ index 5042829e36e1..ba773a8363f1 100644
 -	return int64(uint64(timestamp) / uint64(time.Millisecond))
 -}
 
-From 30c96bca70cda9c65c2d2cb30472b7884bd440d0 Mon Sep 17 00:00:00 2001
-From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
-Date: Thu, 6 Feb 2025 18:29:15 +0000
-Subject: [PATCH 08/10] remove comments, add occonventions package
-
----
- go.mod | 13 +++++++------
- 1 file changed, 7 insertions(+), 6 deletions(-)
-
-diff --git a/go.mod b/go.mod
-index 245b9458e2ba..1ea98c794a67 100644
---- a/go.mod
-+++ b/go.mod
-@@ -17,12 +17,13 @@ retract (
- 	v0.37.0 // Contains dependencies on v0.36.0 components, which should have been updated to v0.37.0.
- )
- 
--require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
--
--replace github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal => ./internal/coreinternal
-+// see https://github.com/distribution/distribution/issues/3590
-+exclude github.com/docker/distribution v2.8.0+incompatible
- 
--replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil => ./pkg/pdatautil
-+// see https://github.com/DataDog/agent-payload/issues/218
-+exclude github.com/DataDog/agent-payload/v5 v5.0.59
- 
--replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest => ./pkg/pdatatest
-+// openshift removed all tags from their repo, use the pseudoversion from the release-3.9 branch HEAD
-+replace github.com/openshift/api v3.9.0+incompatible => github.com/openshift/api v0.0.0-20180801171038-322a19404e37
- 
--replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden => ./pkg/golden
-+require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
-
-From 50e317e6988181adfb67fc0c29f174d7bc8166f0 Mon Sep 17 00:00:00 2001
-From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
-Date: Thu, 6 Feb 2025 19:19:46 +0000
-Subject: [PATCH 09/10] remove unneded pmetrics test
-
----
- go.mod | 9 ---------
- 1 file changed, 9 deletions(-)
-
-diff --git a/go.mod b/go.mod
-index 1ea98c794a67..979aec71e876 100644
---- a/go.mod
-+++ b/go.mod
-@@ -17,13 +17,4 @@ retract (
- 	v0.37.0 // Contains dependencies on v0.36.0 components, which should have been updated to v0.37.0.
- )
- 
--// see https://github.com/distribution/distribution/issues/3590
--exclude github.com/docker/distribution v2.8.0+incompatible
--
--// see https://github.com/DataDog/agent-payload/issues/218
--exclude github.com/DataDog/agent-payload/v5 v5.0.59
--
--// openshift removed all tags from their repo, use the pseudoversion from the release-3.9 branch HEAD
--replace github.com/openshift/api v3.9.0+incompatible => github.com/openshift/api v0.0.0-20180801171038-322a19404e37
--
- require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
-
-From f93c96ae4ffbdffe119b9b3c274958e149bcb913 Mon Sep 17 00:00:00 2001
-From: LucianoGiannotti <luciano_giannotti@hotmail.com.ar>
-Date: Mon, 10 Feb 2025 20:10:26 +0000
-Subject: [PATCH 10/10] run gotidy
-
----
- go.mod | 2 --
- go.sum | 2 --
- 2 files changed, 4 deletions(-)
- delete mode 100644 go.sum
-
-diff --git a/go.mod b/go.mod
-index 979aec71e876..cb23e569d347 100644
---- a/go.mod
-+++ b/go.mod
-@@ -16,5 +16,3 @@ retract (
- 	v0.65.0
- 	v0.37.0 // Contains dependencies on v0.36.0 components, which should have been updated to v0.37.0.
- )
--
--require github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 // indirect
-diff --git a/go.sum b/go.sum
-deleted file mode 100644
-index 6deb8a468b03..000000000000
---- a/go.sum
-+++ /dev/null
-@@ -1,2 +0,0 @@
--github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0 h1:3H9R5Ztc4ISphy+bRlHHExqtS04PBYi7Fptwl9XA52M=
--github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal v0.119.0/go.mod h1:txjr7nwuLZUBitwpU4G7EkZ3gyMBfI/4DXMJxX6NAtU=
 
